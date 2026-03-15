@@ -142,7 +142,7 @@ def convert_claude_to_opencode_frontmatter(content: str, path_prefix: str | None
     converted = content
     converted = convert_tool_references_in_body(converted, _TOOL_REFERENCE_MAP)
     converted = converted.replace("/gpd:", "/gpd-")
-    converted = re.sub(r"~/\.claude\b", resolved_config_dir, converted)
+    converted = re.sub(r"~/\.claude\b", lambda m: resolved_config_dir, converted)
 
     preamble, frontmatter, separator, body = split_markdown_frontmatter(converted)
     if not frontmatter:

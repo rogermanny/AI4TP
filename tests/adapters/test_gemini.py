@@ -15,6 +15,8 @@ from gpd.adapters.gemini import (
     _convert_frontmatter_to_gemini,
     _convert_gemini_tool_name,
     _convert_to_gemini_toml,
+    _render_gemini_policy_toml,
+    _rewrite_gpd_cli_invocations,
 )
 from gpd.adapters.install_utils import build_runtime_cli_bridge_command
 
@@ -571,7 +573,7 @@ class TestInstall:
         assert 'modes = ["autoEdit"]' in policy
         assert "allow_redirection = true" in policy
         assert expected_gemini_bridge(target) in policy
-        assert "'git init'" in policy
+        assert '"git init"' in policy
 
     def test_install_preserves_existing_policy_paths_and_mcp_trust_choice(
         self,
@@ -1019,3 +1021,36 @@ class TestUninstall:
         target.mkdir()
         result = adapter.uninstall(target)
         assert result["removed"] == []
+
+
+class TestRewriteWindowsPathEscape:
+    """Regression: Windows paths with backslashes must not be interpreted as
+    escape sequences by ``re.sub``.  See discussion #12."""
+
+    @pytest.mark.parametrize(
+        "bridge_command",
+        [
+            r"'C:\Users\OuterSpaceOrg\.gpd\venv\Scripts\python.exe' -m gpd.runtime_cli",
+            r"'C:\Users\me\.gpd\venv\Scripts\python.exe' -m gpd.runtime_cli",
+        ],
+    )
+    def test_rewrite_gpd_cli_invocations_windows_path(self, bridge_command: str) -> None:
+        content = "Run `gpd status` to check progress."
+        result = _rewrite_gpd_cli_invocations(content, bridge_command)
+        assert bridge_command in result
+        assert "gpd status" not in result
+
+
+class TestPolicyTomlWindowsPath:
+    """Regression: policy TOML must be valid even when bridge_command contains
+    Windows backslash paths.  See discussion #12."""
+
+    def test_render_policy_toml_with_windows_path(self) -> None:
+        import tomllib
+
+        bridge = r"'C:\Users\OuterSpaceOrg\.gpd\venv\Scripts\python.exe' -m gpd.runtime_cli --runtime gemini"
+        toml_text = _render_gemini_policy_toml(bridge)
+        parsed = tomllib.loads(toml_text)
+        prefixes = parsed["rule"][0]["commandPrefix"]
+        assert any("python" in p for p in prefixes)
+        assert any("git init" in p for p in prefixes)

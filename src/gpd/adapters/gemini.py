@@ -202,7 +202,7 @@ def _gemini_policy_command_prefixes(bridge_command: str) -> tuple[str, ...]:
 
 def _rewrite_gpd_cli_invocations(content: str, bridge_command: str) -> str:
     """Rewrite bare ``gpd`` CLI calls to the shared runtime CLI bridge."""
-    return _GPD_CLI_INVOCATION_RE.sub(bridge_command, content)
+    return _GPD_CLI_INVOCATION_RE.sub(lambda m: bridge_command, content)
 
 
 def _inject_gemini_command_runtime_note(content: str, bridge_command: str) -> str:
@@ -396,7 +396,7 @@ def _render_gemini_policy_toml(bridge_command: str) -> str:
     """Render the Gemini policy file GPD installs for headless auto-edit flows."""
     rendered_prefixes: list[str] = []
     for prefix in _gemini_policy_command_prefixes(bridge_command):
-        rendered_prefixes.append("'" + prefix.replace("'", "''") + "'")
+        rendered_prefixes.append(json.dumps(prefix))
     prefixes = ",\n  ".join(rendered_prefixes)
     return (
         "# Managed by Get Physics Done (GPD).\n"
