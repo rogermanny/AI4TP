@@ -819,6 +819,8 @@ def test_major_research_bootstrap_creates_plan_and_review_gate(tmp_path: Path):
     assert (tmp_path / ".gpd" / "major" / "REVIEWS.md").is_file()
     assert (tmp_path / ".gpd" / "major" / "units" / "PH01-U01" / "EXECUTION.md").is_file()
     assert (tmp_path / ".gpd" / "major" / "units" / "PH01-U01" / "VERIFICATION.md").is_file()
+    assert (tmp_path / ".gpd" / "major" / "units" / "PH01-U01" / "Proof.lean").is_file()
+    assert (tmp_path / ".gpd" / "major" / "units" / "PH01-U01" / "LEAN-STATUS.md").is_file()
 
     state = json.loads((tmp_path / ".gpd" / "major" / "STATE.json").read_text(encoding="utf-8"))
     unit = state["phases"][0]["units"][0]
@@ -828,6 +830,11 @@ def test_major_research_bootstrap_creates_plan_and_review_gate(tmp_path: Path):
     assert unit["status"] == "awaiting_review"
     assert unit["execution_status"] == "completed"
     assert unit["verification_status"] == "passed"
+    assert unit["lean_requested"] is True
+    assert unit["lean_mode"] == "scaffold"
+    assert unit["lean_status"] in {"passed", "unavailable"}
+    assert unit["artifacts"]["lean_file"].endswith("Proof.lean")
+    assert unit["artifacts"]["lean_status"].endswith("LEAN-STATUS.md")
     assert "awaiting_review" in result.output
 
 
@@ -850,6 +857,7 @@ def test_major_research_review_approve_then_resume_advances_to_next_unit(tmp_pat
     assert state["review_pending"] is True
     assert state["phases"][0]["units"][0]["status"] == "approved"
     assert state["phases"][0]["units"][0]["verification_status"] == "approved"
+    assert state["phases"][0]["units"][0]["lean_status"] in {"approved", "not_applicable", "unavailable", "passed"}
     assert state["phases"][0]["units"][1]["status"] == "awaiting_review"
     assert state["phases"][0]["units"][1]["execution_status"] == "completed"
     assert state["phases"][0]["units"][1]["verification_status"] == "passed"
@@ -874,6 +882,7 @@ def test_major_research_review_revise_then_resume_reruns_same_unit(tmp_path: Pat
     assert revised_state["review_pending"] is False
     assert revised_state["phases"][0]["units"][0]["status"] == "needs_revision"
     assert revised_state["phases"][0]["units"][0]["verification_status"] == "needs_revision"
+    assert revised_state["phases"][0]["units"][0]["lean_status"] in {"needs_revision", "failed", "unavailable"}
     assert revised_state["phases"][0]["units"][0]["feedback"][-1] == "Need a clearer dependency map."
 
     resume = runner.invoke(app, ["--cwd", str(tmp_path), "resume"], catch_exceptions=False)
@@ -885,6 +894,7 @@ def test_major_research_review_revise_then_resume_reruns_same_unit(tmp_path: Pat
     assert rerun_state["phases"][0]["units"][0]["status"] == "awaiting_review"
     assert rerun_state["phases"][0]["units"][0]["execution_status"] == "completed"
     assert rerun_state["phases"][0]["units"][0]["verification_status"] == "passed"
+    assert rerun_state["phases"][0]["units"][0]["lean_status"] in {"passed", "unavailable"}
     assert rerun_state["phases"][0]["units"][0]["revision_count"] == 1
 
 
@@ -903,6 +913,7 @@ def test_major_research_status_reports_next_action(tmp_path: Path):
     assert payload["review_pending"] is True
     assert payload["execution_status"] == "completed"
     assert payload["verification_status"] == "passed"
+    assert payload["lean_status"] in {"passed", "unavailable"}
     assert payload["next_action"] == "ai4tp review --approve | ai4tp review --revise \"feedback\""
 
 

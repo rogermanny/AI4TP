@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -27,6 +29,8 @@ _MAJOR_CURRENT_UNIT_FILENAME = "CURRENT-UNIT.md"
 _MAJOR_UNITS_DIRNAME = "units"
 _MAJOR_EXECUTION_FILENAME = "EXECUTION.md"
 _MAJOR_VERIFICATION_FILENAME = "VERIFICATION.md"
+_MAJOR_LEAN_FILENAME = "Proof.lean"
+_MAJOR_LEAN_STATUS_FILENAME = "LEAN-STATUS.md"
 _MAJOR_SCHEMA_VERSION = 1
 
 
@@ -232,6 +236,9 @@ def _build_phases(topic: str, *, max_phases: int, max_units_per_phase: int) -> l
                     "status": "planned",
                     "execution_status": "not_started",
                     "verification_status": "pending",
+                    "lean_requested": False,
+                    "lean_mode": "disabled",
+                    "lean_status": "not_applicable",
                     "feedback": [],
                     "revision_count": 0,
                     "run_count": 0,
@@ -272,6 +279,8 @@ def _unit_paths(cwd: Path, unit_id: str) -> dict[str, Path]:
         "dir": base_dir,
         "execution": base_dir / _MAJOR_EXECUTION_FILENAME,
         "verification": base_dir / _MAJOR_VERIFICATION_FILENAME,
+        "lean_file": base_dir / _MAJOR_LEAN_FILENAME,
+        "lean_status": base_dir / _MAJOR_LEAN_STATUS_FILENAME,
     }
 
 
@@ -280,6 +289,101 @@ def _relative_to_cwd(cwd: Path, path: Path) -> str:
         return str(path.relative_to(cwd)).replace("\\", "/")
     except ValueError:
         return str(path).replace("\\", "/")
+
+
+def _render_lean_scaffold(unit: dict[str, Any]) -> str:
+    theorem_name = str(unit.get("id", "unit")).lower().replace("-", "_") + "_scaffold"
+    objective = str(unit.get("objective", "")).strip()
+    expected_output = str(unit.get("expected_output", "")).strip()
+    return (
+        "/-\n"
+        f"AI4TP Lean scaffold for {unit.get('id', 'unit')}.\n\n"
+        "This file checks that the unit has a formal-proof placeholder that compiles in Lean.\n"
+        "It does not, by itself, certify the full research claim; human refinement may replace this scaffold with a stronger obligation.\n\n"
+        f"Objective: {objective}\n"
+        f"Expected output: {expected_output}\n"
+        "-/\n\n"
+        "namespace AI4TP\n\n"
+        f"theorem {theorem_name} : True := by\n"
+        "  trivial\n\n"
+        "end AI4TP\n"
+    )
+
+
+def _run_lean_verification(cwd: Path, unit: dict[str, Any], unit_paths: dict[str, Path]) -> tuple[str, str, str]:
+    if not bool(unit.get("lean_requested", False)):
+        status_text = (
+            f"# Lean Status — {unit['id']}\n\n"
+            "**Status:** not_applicable\n\n"
+            "Lean verification was disabled for this execution unit.\n"
+        )
+        atomic_write(unit_paths["lean_status"], status_text)
+        return "not_applicable", "disabled", "Lean verification disabled for this run."
+
+    lean_file = unit_paths["lean_file"]
+    atomic_write(lean_file, _render_lean_scaffold(unit))
+
+    lake_path = shutil.which("lake")
+    lean_path = shutil.which("lean")
+    if not lean_path:
+        status_text = (
+            f"# Lean Status — {unit['id']}\n\n"
+            "**Status:** unavailable\n\n"
+            "Lean is not available on PATH. Install `elan` and the Lean 4 toolchain to enable formal verification for this unit.\n"
+        )
+        atomic_write(unit_paths["lean_status"], status_text)
+        return "unavailable", "scaffold", "Lean toolchain not found on PATH."
+
+    command: list[str]
+    if lake_path and ((cwd / "lakefile.toml").exists() or (cwd / "lakefile.lean").exists()):
+        command = [lake_path, "env", "lean", str(lean_file)]
+    else:
+        command = [lean_path, str(lean_file)]
+
+    try:
+        result = subprocess.run(
+            command,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        status_text = (
+            f"# Lean Status — {unit['id']}\n\n"
+            "**Status:** failed\n\n"
+            f"Lean invocation failed: {exc}\n"
+        )
+        atomic_write(unit_paths["lean_status"], status_text)
+        return "failed", "scaffold", f"Lean invocation failed: {exc}"
+
+    stderr = (result.stderr or "").strip()
+    stdout = (result.stdout or "").strip()
+    if result.returncode == 0:
+        status_text = (
+            f"# Lean Status — {unit['id']}\n\n"
+            "**Status:** passed\n\n"
+            f"**Command:** `{' '.join(Path(part).name if index == 0 else part for index, part in enumerate(command))}`\n\n"
+            "The generated Lean scaffold compiled successfully. This confirms the proof placeholder is syntactically valid; the human reviewer may still strengthen the formal obligation.\n"
+        )
+        if stdout:
+            status_text += f"\n## Lean output\n\n```text\n{stdout}\n```\n"
+        atomic_write(unit_paths["lean_status"], status_text)
+        return "passed", "scaffold", "Lean scaffold compiled successfully."
+
+    status_text = (
+        f"# Lean Status — {unit['id']}\n\n"
+        "**Status:** failed\n\n"
+        f"**Command:** `{' '.join(Path(part).name if index == 0 else part for index, part in enumerate(command))}`\n\n"
+        "The generated Lean scaffold did not compile. Review the error output below before approving this unit.\n"
+    )
+    if stdout or stderr:
+        combined = "\n".join(part for part in (stdout, stderr) if part).strip()
+        status_text += f"\n## Lean output\n\n```text\n{combined}\n```\n"
+    atomic_write(unit_paths["lean_status"], status_text)
+    return "failed", "scaffold", "Lean scaffold failed to compile."
 
 
 def _execute_and_verify_unit(
@@ -348,14 +452,21 @@ def _execute_and_verify_unit(
     ]
     atomic_write(unit_paths["verification"], "\n".join(verification_lines).rstrip() + "\n")
 
+    unit["lean_requested"] = bool(state.get("lean_requested", True))
+    lean_status, lean_mode, lean_note = _run_lean_verification(cwd, unit, unit_paths)
+
     unit["run_count"] = run_count
     unit["last_run_at"] = timestamp
     unit["status"] = "awaiting_review"
     unit["execution_status"] = "completed"
-    unit["verification_status"] = "passed"
+    unit["verification_status"] = "failed" if lean_status == "failed" else "passed"
+    unit["lean_mode"] = lean_mode
+    unit["lean_status"] = lean_status
     unit["artifacts"] = {
         "execution": _relative_to_cwd(cwd, unit_paths["execution"]),
         "verification": _relative_to_cwd(cwd, unit_paths["verification"]),
+        "lean_file": _relative_to_cwd(cwd, unit_paths["lean_file"]),
+        "lean_status": _relative_to_cwd(cwd, unit_paths["lean_status"]),
     }
     state["current_phase"] = phase["id"]
     state["current_unit"] = unit["id"]
@@ -364,7 +475,7 @@ def _execute_and_verify_unit(
         {
             "timestamp": timestamp,
             "action": "executed-and-verified",
-            "detail": f"Executed and verified {unit['id']} ({rerun_reason}); waiting for human review.",
+            "detail": f"Executed and verified {unit['id']} ({rerun_reason}); Lean status: {lean_status}. {lean_note}",
         }
     )
 
@@ -401,6 +512,8 @@ def _state_summary(state: dict[str, Any]) -> dict[str, Any]:
         "unit_status": current_unit.get("status") if current_unit else state.get("overall_status", "not_started"),
         "execution_status": current_unit.get("execution_status") if current_unit else None,
         "verification_status": current_unit.get("verification_status") if current_unit else None,
+        "lean_status": current_unit.get("lean_status") if current_unit else None,
+        "lean_mode": current_unit.get("lean_mode") if current_unit else None,
         "artifacts": current_unit.get("artifacts", {}) if current_unit else {},
         "review_pending": bool(state.get("review_pending", False)),
         "overall_status": state.get("overall_status", "active"),
@@ -430,6 +543,7 @@ def _render_plan_markdown(state: dict[str, Any]) -> str:
             lines.append(f"  - Expected output: {unit['expected_output']}")
             lines.append(f"  - Execution status: {unit.get('execution_status', 'not_started')}")
             lines.append(f"  - Verification status: {unit.get('verification_status', 'pending')}")
+            lines.append(f"  - Lean status: {unit.get('lean_status', 'not_applicable')} ({unit.get('lean_mode', 'disabled')})")
             lines.append(f"  - Verification: {unit['verification_check']}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
@@ -463,6 +577,7 @@ def _render_current_unit_markdown(state: dict[str, Any]) -> str:
         f"**Status:** {unit['status']}",
         f"**Execution status:** {unit.get('execution_status', 'not_started')}",
         f"**Verification status:** {unit.get('verification_status', 'pending')}",
+        f"**Lean status:** {unit.get('lean_status', 'not_applicable')} ({unit.get('lean_mode', 'disabled')})",
         "",
         "## Objective",
         "",
@@ -485,6 +600,8 @@ def _render_current_unit_markdown(state: dict[str, Any]) -> str:
                 "",
                 f"- Execution: {artifacts.get('execution', '[missing]')}",
                 f"- Verification: {artifacts.get('verification', '[missing]')}",
+                f"- Lean file: {artifacts.get('lean_file', '[missing]')}",
+                f"- Lean status: {artifacts.get('lean_status', '[missing]')}",
                 "",
             ]
         )
@@ -539,6 +656,7 @@ def start_major_research(
     brief_text: str | None,
     max_phases: int = 10,
     max_units_per_phase: int = 3,
+    lean_requested: bool = True,
 ) -> dict[str, Any]:
     if max_phases < 1:
         raise ValueError("`--max-phases` must be at least 1.")
@@ -560,6 +678,7 @@ def start_major_research(
         "topic": topic_text,
         "brief": (brief_text or topic_text).strip(),
         "overall_status": "active",
+        "lean_requested": lean_requested,
         "review_pending": False,
         "current_phase": None,
         "current_unit": None,
@@ -602,11 +721,17 @@ def review_major_research(cwd: Path, *, approve: bool, revise_feedback: str | No
     verdict = "approved" if approve else "revise"
     feedback_text = (revise_feedback or "").strip()
     if approve:
+        if unit.get("lean_status") == "failed":
+            raise ValueError("Lean verification failed for the current unit. Use `ai4tp review --revise \"feedback\"` instead of approving it.")
         unit["status"] = "approved"
         unit["verification_status"] = "approved"
+        if unit.get("lean_status") == "passed":
+            unit["lean_status"] = "approved"
     else:
         unit["status"] = "needs_revision"
         unit["verification_status"] = "needs_revision"
+        if unit.get("lean_status") not in {"unavailable", "not_applicable"}:
+            unit["lean_status"] = "needs_revision"
         unit.setdefault("feedback", []).append(feedback_text)
 
     state["review_pending"] = False

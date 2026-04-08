@@ -1,0 +1,6 @@
+name = "AI4TP"
+version = "0.1.0"
+defaultTargets = ["AI4TP"]
+
+[[lean_lib]]
+name = "AI4TP"

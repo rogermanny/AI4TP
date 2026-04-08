@@ -2174,6 +2174,7 @@ def research_cmd(
         max=6,
         help="Maximum number of small execution units per phase.",
     ),
+    lean: bool = typer.Option(True, "--lean/--no-lean", help="Attempt Lean verification for each execution unit when possible."),
 ) -> None:
     """Start a major research program that pauses after each small unit for human review."""
     from gpd.core.major_research import start_major_research
@@ -2200,6 +2201,7 @@ def research_cmd(
             brief_text=brief_text,
             max_phases=max_phases,
             max_units_per_phase=max_units_per_phase,
+            lean_requested=lean,
         )
     except ValueError as exc:
         _error(str(exc))

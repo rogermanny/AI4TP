@@ -65,7 +65,8 @@ You can use either `gpd` or `ai4tp`, but `ai4tp` is the AI4TP-branded entrypoint
 
 - **interactive project bootstrap** from the terminal with `ai4tp new-project`
 - **major research orchestration** with `ai4tp research --major --topic "..."`
-- a saved **execute → verify → human approve/revise → resume** loop
+- a saved **execute → verify → Lean check → human approve/revise → resume** loop
+- per-unit **Lean proof scaffolds** and `LEAN-STATUS.md` reports under `.gpd/major/units/`
 - runtime/chat aliases such as `/ai4tp:help`, `/ai4tp:new-project`, `$ai4tp-help`, and `/ai4tp-help`
 
 Typical major-research flow:
@@ -78,7 +79,9 @@ ai4tp review --revise "feedback"
 ai4tp resume
 ```
 
-In major mode, AI4TP breaks the project into small execution units, writes execution and verification records under `.gpd/major/`, pauses for human expert review, and only proceeds to the next unit after approval or revision.
+In major mode, AI4TP breaks the project into small execution units, writes execution and verification records under `.gpd/major/`, generates `Proof.lean` and `LEAN-STATUS.md` when Lean verification is enabled, pauses for human expert review, and only proceeds to the next unit after approval or revision.
+
+If you want Lean checks on your machine, install [`elan`](https://leanprover.github.io/elan-init.html). This repo now includes a pinned `lean-toolchain` and `lakefile.toml` so users with Lean installed can run the generated proof scaffolds directly.
 
 <details>
 <summary><strong>Install options</strong></summary>
@@ -151,7 +154,7 @@ GPD guides research in four stages:
 3. **Execute**: runs specialist agents for derivations, numerical checks, literature work, and writing.
 4. **Verify**: checks dimensional consistency, limiting cases, symmetry constraints, conservation laws, and numerical stability.
 
-In **AI4TP major-research mode**, that loop is wrapped in a persistent human-in-the-loop controller: AI4TP plans the next unit, records execution and pre-review verification artifacts, pauses for an expert to `approve` or `revise`, then resumes from saved state with `ai4tp resume`.
+In **AI4TP major-research mode**, that loop is wrapped in a persistent human-in-the-loop controller: AI4TP plans the next unit, records execution and pre-review verification artifacts, optionally compiles a Lean scaffold for that unit, pauses for an expert to `approve` or `revise`, then resumes from saved state with `ai4tp resume`.
 
 Each phase produces real artifacts such as `PROJECT.md`, `REQUIREMENTS.md`, `ROADMAP.md`, `STATE.md`, `.tex` derivations, `.py` verification scripts, and figures.
 
