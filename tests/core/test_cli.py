@@ -751,6 +751,161 @@ def test_init_new_project(mock_init):
     mock_init.assert_called_once()
 
 
+def test_new_project_bootstrap_prompts_for_brief(tmp_path: Path):
+    result = runner.invoke(
+        app,
+        ["--cwd", str(tmp_path), "new-project"],
+        input=(
+            "Investigate the finite-temperature phase diagram of the 2D Hubbard model.\n"
+            "Compare against trusted QMC benchmarks and flag any anchor still unknown.\n\n"
+        ),
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / ".gpd" / "PROJECT.md").is_file()
+    assert (tmp_path / ".gpd" / "PROJECT-BRIEF.md").is_file()
+    assert (tmp_path / ".gpd" / "config.json").is_file()
+
+    state = json.loads((tmp_path / ".gpd" / "state.json").read_text(encoding="utf-8"))
+    assert state["project_contract"]["scope"]["question"]
+    assert state["project_contract"]["deliverables"]
+
+
+def test_new_group_project_alias_accepts_inline_brief(tmp_path: Path):
+    result = runner.invoke(
+        app,
+        [
+            "--cwd",
+            str(tmp_path),
+            "new",
+            "project",
+            "Build",
+            "an",
+            "AI-assisted",
+            "theoretical",
+            "physics",
+            "workflow",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    project_md = (tmp_path / ".gpd" / "PROJECT.md").read_text(encoding="utf-8")
+    assert "AI-assisted theoretical physics workflow" in project_md
+
+
+def test_major_research_bootstrap_creates_plan_and_review_gate(tmp_path: Path):
+    result = runner.invoke(
+        app,
+        [
+            "--cwd",
+            str(tmp_path),
+            "research",
+            "--major",
+            "--topic",
+            "Constructive 2D Yang-Mills",
+            "--max-phases",
+            "4",
+            "--max-units-per-phase",
+            "2",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / ".gpd" / "major" / "PLAN.md").is_file()
+    assert (tmp_path / ".gpd" / "major" / "STATE.json").is_file()
+    assert (tmp_path / ".gpd" / "major" / "REVIEWS.md").is_file()
+    assert (tmp_path / ".gpd" / "major" / "units" / "PH01-U01" / "EXECUTION.md").is_file()
+    assert (tmp_path / ".gpd" / "major" / "units" / "PH01-U01" / "VERIFICATION.md").is_file()
+
+    state = json.loads((tmp_path / ".gpd" / "major" / "STATE.json").read_text(encoding="utf-8"))
+    unit = state["phases"][0]["units"][0]
+    assert state["mode"] == "major_research"
+    assert state["current_unit"] == "PH01-U01"
+    assert state["review_pending"] is True
+    assert unit["status"] == "awaiting_review"
+    assert unit["execution_status"] == "completed"
+    assert unit["verification_status"] == "passed"
+    assert "awaiting_review" in result.output
+
+
+def test_major_research_review_approve_then_resume_advances_to_next_unit(tmp_path: Path):
+    start = runner.invoke(
+        app,
+        ["--cwd", str(tmp_path), "research", "--major", "--topic", "Poincare Conjecture", "--max-phases", "3"],
+        catch_exceptions=False,
+    )
+    assert start.exit_code == 0, start.output
+
+    review = runner.invoke(app, ["--cwd", str(tmp_path), "review", "--approve"], catch_exceptions=False)
+    assert review.exit_code == 0, review.output
+
+    resume = runner.invoke(app, ["--cwd", str(tmp_path), "resume"], catch_exceptions=False)
+    assert resume.exit_code == 0, resume.output
+
+    state = json.loads((tmp_path / ".gpd" / "major" / "STATE.json").read_text(encoding="utf-8"))
+    assert state["current_unit"] == "PH01-U02"
+    assert state["review_pending"] is True
+    assert state["phases"][0]["units"][0]["status"] == "approved"
+    assert state["phases"][0]["units"][0]["verification_status"] == "approved"
+    assert state["phases"][0]["units"][1]["status"] == "awaiting_review"
+    assert state["phases"][0]["units"][1]["execution_status"] == "completed"
+    assert state["phases"][0]["units"][1]["verification_status"] == "passed"
+
+
+def test_major_research_review_revise_then_resume_reruns_same_unit(tmp_path: Path):
+    start = runner.invoke(
+        app,
+        ["--cwd", str(tmp_path), "research", "--major", "--topic", "Fermat's Last Theorem", "--max-phases", "3"],
+        catch_exceptions=False,
+    )
+    assert start.exit_code == 0, start.output
+
+    review = runner.invoke(
+        app,
+        ["--cwd", str(tmp_path), "review", "--revise", "Need a clearer dependency map."],
+        catch_exceptions=False,
+    )
+    assert review.exit_code == 0, review.output
+
+    revised_state = json.loads((tmp_path / ".gpd" / "major" / "STATE.json").read_text(encoding="utf-8"))
+    assert revised_state["review_pending"] is False
+    assert revised_state["phases"][0]["units"][0]["status"] == "needs_revision"
+    assert revised_state["phases"][0]["units"][0]["verification_status"] == "needs_revision"
+    assert revised_state["phases"][0]["units"][0]["feedback"][-1] == "Need a clearer dependency map."
+
+    resume = runner.invoke(app, ["--cwd", str(tmp_path), "resume"], catch_exceptions=False)
+    assert resume.exit_code == 0, resume.output
+
+    rerun_state = json.loads((tmp_path / ".gpd" / "major" / "STATE.json").read_text(encoding="utf-8"))
+    assert rerun_state["current_unit"] == "PH01-U01"
+    assert rerun_state["review_pending"] is True
+    assert rerun_state["phases"][0]["units"][0]["status"] == "awaiting_review"
+    assert rerun_state["phases"][0]["units"][0]["execution_status"] == "completed"
+    assert rerun_state["phases"][0]["units"][0]["verification_status"] == "passed"
+    assert rerun_state["phases"][0]["units"][0]["revision_count"] == 1
+
+
+def test_major_research_status_reports_next_action(tmp_path: Path):
+    start = runner.invoke(
+        app,
+        ["--cwd", str(tmp_path), "research", "--major", "--topic", "Major thesis program", "--max-phases", "3"],
+        catch_exceptions=False,
+    )
+    assert start.exit_code == 0, start.output
+
+    status = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "status"], catch_exceptions=False)
+    assert status.exit_code == 0, status.output
+    payload = json.loads(status.output)
+    assert payload["mode"] == "major_research"
+    assert payload["review_pending"] is True
+    assert payload["execution_status"] == "completed"
+    assert payload["verification_status"] == "passed"
+    assert payload["next_action"] == "ai4tp review --approve | ai4tp review --revise \"feedback\""
+
+
 def test_paper_build_uses_default_config_surface(tmp_path: Path):
     paper_dir = tmp_path / "paper"
     paper_dir.mkdir()

@@ -548,6 +548,23 @@ description: Nested command include expansion regression
         assert "Use ask_user:" not in content
         assert "Ask the user once using a single compact prompt block:" in content
 
+    def test_install_adds_ai4tp_skill_aliases(
+        self,
+        adapter: CodexAdapter,
+        tmp_path: Path,
+    ) -> None:
+        gpd_root = Path(__file__).resolve().parents[2] / "src" / "gpd"
+        target = tmp_path / ".codex"
+        target.mkdir()
+        skills = tmp_path / "skills"
+        skills.mkdir()
+
+        adapter.install(gpd_root, target, skills_dir=skills)
+
+        alias_skill = (skills / "ai4tp-help" / "SKILL.md").read_text(encoding="utf-8")
+        assert "$ai4tp-new-project" in alias_skill
+        assert "name: ai4tp-help" in alias_skill
+
     def test_new_project_workflow_normalizes_codex_questioning(
         self,
         adapter: CodexAdapter,

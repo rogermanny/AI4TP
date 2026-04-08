@@ -115,6 +115,19 @@ class TestInstall:
         content = help_file.read_text(encoding="utf-8")
         assert "{GPD_INSTALL_DIR}" not in content
 
+    def test_install_adds_ai4tp_command_aliases(
+        self, adapter: ClaudeCodeAdapter, gpd_root: Path, tmp_path: Path
+    ) -> None:
+        target = tmp_path / "target" / ".claude"
+        target.mkdir(parents=True)
+        adapter.install(gpd_root, target)
+
+        alias_help = target / "commands" / "ai4tp" / "help.md"
+        assert alias_help.exists()
+        content = alias_help.read_text(encoding="utf-8")
+        assert "/ai4tp:new-project" in content
+        assert "name: ai4tp:help" in content
+
     def test_install_agents_have_placeholder_replacement(
         self, adapter: ClaudeCodeAdapter, gpd_root: Path, tmp_path: Path
     ) -> None:

@@ -35,6 +35,7 @@ from gpd.adapters.install_utils import (
     remove_stale_agents,
     render_markdown_frontmatter,
     replace_placeholders,
+    rewrite_command_namespace_alias,
     split_markdown_frontmatter,
     strip_sub_tags,
 )
@@ -265,6 +266,8 @@ def copy_flattened_commands(
                 src_root=gpd_src_root,
             )
             content = convert_claude_to_opencode_frontmatter(content, path_prefix)
+            if prefix.startswith("ai4tp"):
+                content = rewrite_command_namespace_alias(content, target_namespace="ai4tp")
 
             dest_path.write_text(content, encoding="utf-8")
             count += 1
@@ -426,10 +429,10 @@ def write_manifest(
     for rel, h in gpd_hashes.items():
         manifest["files"]["get-physics-done/" + rel] = h
 
-    # command/gpd-*.md files (OpenCode flat structure)
+    # command/{gpd,ai4tp}-*.md files (OpenCode flat structure)
     if command_dir.exists():
         for f in sorted(command_dir.iterdir()):
-            if f.name.startswith("gpd-") and f.name.endswith(".md"):
+            if f.name.startswith(("gpd-", "ai4tp-")) and f.name.endswith(".md"):
                 manifest["files"]["command/" + f.name] = file_hash(f)
 
     # agents/gpd-*.md files
@@ -539,11 +542,11 @@ def uninstall_opencode(target_dir: Path, *, config_dir: Path) -> dict[str, int]:
     """
     counts: dict[str, int] = {"commands": 0, "agents": 0, "hooks": 0, "dirs": 0, "permissions": 0}
 
-    # 1. Remove command/gpd-*.md files
+    # 1. Remove command/{gpd,ai4tp}-*.md files
     command_dir = target_dir / "command"
     if command_dir.exists():
         for f in command_dir.iterdir():
-            if f.name.startswith("gpd-") and f.name.endswith(".md"):
+            if f.name.startswith(("gpd-", "ai4tp-")) and f.name.endswith(".md"):
                 f.unlink()
                 counts["commands"] += 1
 
@@ -735,7 +738,7 @@ class OpenCodeAdapter(RuntimeAdapter):
         commands_src = gpd_root / "commands"
         command_dir = target_dir / "command"
         command_dir.mkdir(parents=True, exist_ok=True)
-        return copy_flattened_commands(
+        command_count = copy_flattened_commands(
             commands_src,
             command_dir,
             "gpd",
@@ -743,6 +746,15 @@ class OpenCodeAdapter(RuntimeAdapter):
             gpd_root / "specs",
             self._current_install_scope_flag(),
         )
+        copy_flattened_commands(
+            commands_src,
+            command_dir,
+            "ai4tp",
+            path_prefix,
+            gpd_root / "specs",
+            self._current_install_scope_flag(),
+        )
+        return command_count
 
     def _install_content(self, gpd_root: Path, target_dir: Path, path_prefix: str, failures: list[str]) -> None:
         super()._install_content(gpd_root, target_dir, path_prefix, failures)

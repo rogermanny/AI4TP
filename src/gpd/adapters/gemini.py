@@ -31,6 +31,7 @@ from gpd.adapters.install_utils import (
     read_settings,
     remove_stale_agents,
     render_markdown_frontmatter,
+    rewrite_command_namespace_alias,
     split_markdown_frontmatter,
     strip_sub_tags,
     verify_installed,
@@ -405,6 +406,7 @@ def _render_gemini_policy_toml(bridge_command: str) -> str:
         "# GPD's bootstrap workflows rely on. The runtime CLI bridge validates the\n"
         "# install contract and pins the active runtime before dispatching to the\n"
         "# shared CLI implementation.\n"
+        f"# Runtime CLI bridge: {bridge_command}\n"
         "\n"
         "[[rule]]\n"
         'toolName = "run_shell_command"\n'
@@ -582,6 +584,7 @@ def _install_commands_as_toml(
     install_scope: str | None = None,
     *,
     bridge_command: str,
+    command_namespace: str = "gpd",
 ) -> None:
     """Install commands as .toml files in nested ``commands/gpd/`` structure.
 
@@ -603,6 +606,7 @@ def _install_commands_as_toml(
         gpd_src_root,
         install_scope,
         bridge_command=bridge_command,
+        command_namespace=command_namespace,
     )
 
 
@@ -615,6 +619,7 @@ def _copy_commands_recursive(
     install_scope: str | None = None,
     *,
     bridge_command: str,
+    command_namespace: str = "gpd",
 ) -> None:
     """Recursively copy commands, converting .md to .toml for Gemini."""
     for entry in sorted(src_dir.iterdir()):
@@ -629,6 +634,7 @@ def _copy_commands_recursive(
                 gpd_src_root,
                 install_scope,
                 bridge_command=bridge_command,
+                command_namespace=command_namespace,
             )
         elif entry.suffix == ".md":
             content = compile_markdown_for_runtime(
@@ -645,6 +651,8 @@ def _copy_commands_recursive(
             content = _rewrite_gpd_cli_invocations(content, bridge_command)
             content = _inject_gemini_command_runtime_note(content, bridge_command)
             toml_content = _convert_to_gemini_toml(content)
+            if command_namespace != "gpd":
+                toml_content = rewrite_command_namespace_alias(toml_content, target_namespace=command_namespace)
             toml_path = dest_dir / entry.with_suffix(".toml").name
             toml_path.write_text(toml_content, encoding="utf-8")
         else:
@@ -696,6 +704,7 @@ class GeminiAdapter(RuntimeAdapter):
     def _install_commands(self, gpd_root: Path, target_dir: Path, path_prefix: str, failures: list[str]) -> int:
         commands_src = gpd_root / "commands"
         commands_dest = target_dir / "commands" / "gpd"
+        alias_dest = target_dir / "commands" / "ai4tp"
         (target_dir / "commands").mkdir(parents=True, exist_ok=True)
         bridge_command = self.runtime_cli_bridge_command(target_dir)
         _install_commands_as_toml(
@@ -706,11 +715,26 @@ class GeminiAdapter(RuntimeAdapter):
             attribution=self.get_commit_attribution(),
             install_scope=self._current_install_scope_flag(),
             bridge_command=bridge_command,
+            command_namespace="gpd",
+        )
+        _install_commands_as_toml(
+            commands_src,
+            alias_dest,
+            path_prefix,
+            gpd_root / "specs",
+            attribution=self.get_commit_attribution(),
+            install_scope=self._current_install_scope_flag(),
+            bridge_command=bridge_command,
+            command_namespace="ai4tp",
         )
         if verify_installed(commands_dest, "commands/gpd"):
             logger.info("Installed commands/gpd (TOML format)")
         else:
             failures.append("commands/gpd")
+        if verify_installed(alias_dest, "commands/ai4tp"):
+            logger.info("Installed commands/ai4tp (TOML format)")
+        else:
+            failures.append("commands/ai4tp")
         return sum(1 for f in commands_dest.rglob("*.toml") if f.is_file()) if commands_dest.exists() else 0
 
     def _install_agents(self, gpd_root: Path, target_dir: Path, path_prefix: str, failures: list[str]) -> int:
@@ -805,7 +829,7 @@ class GeminiAdapter(RuntimeAdapter):
         policy_path.parent.mkdir(parents=True, exist_ok=True)
         policy_path.write_text(_render_gemini_policy_toml(bridge_command), encoding="utf-8")
         self._managed_runtime_files = [
-            str(policy_path.relative_to(target_dir)),
+            str(policy_path.relative_to(target_dir)).replace("\\", "/"),
         ]
 
         policy_dir_setting = str(policy_path.parent.resolve())

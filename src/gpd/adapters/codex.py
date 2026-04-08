@@ -38,6 +38,7 @@ from gpd.adapters.install_utils import (
     pre_install_cleanup,
     remove_stale_agents,
     render_markdown_frontmatter,
+    rewrite_command_namespace_alias,
     split_markdown_frontmatter,
     verify_installed,
     write_manifest,
@@ -539,7 +540,18 @@ class CodexAdapter(RuntimeAdapter):
             self._current_install_scope_flag(),
             launcher=launcher,
         )
-        if verify_installed(self._skills_dir, "command skills"):
+        _copy_commands_as_skills(
+            commands_src,
+            self._skills_dir,
+            "ai4tp",
+            path_prefix,
+            gpd_root / "specs",
+            self._current_install_scope_flag(),
+            launcher=launcher,
+        )
+        if verify_installed(self._skills_dir, "command skills") and any(
+            d.is_dir() and d.name.startswith("ai4tp-") for d in self._skills_dir.iterdir()
+        ):
             logger.info("Installed command skills")
         else:
             failures.append("command skills")
@@ -820,6 +832,8 @@ def _copy_commands_as_skills(
             content = _rewrite_codex_gpd_cli_invocations(content, launcher)
             content = _normalize_codex_questioning(content)
             content = _inject_codex_command_runtime_note(content, launcher)
+            if skill_name.startswith("ai4tp-"):
+                content = rewrite_command_namespace_alias(content, target_namespace="ai4tp")
 
             (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
 

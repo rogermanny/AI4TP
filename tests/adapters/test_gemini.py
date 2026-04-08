@@ -667,6 +667,21 @@ class TestInstall:
         assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in state_schema
         assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in state_schema
 
+    def test_install_adds_ai4tp_command_aliases(
+        self,
+        adapter: GeminiAdapter,
+        tmp_path: Path,
+    ) -> None:
+        gpd_root = Path(__file__).resolve().parents[2] / "src" / "gpd"
+        target = tmp_path / ".gemini"
+        target.mkdir()
+        result = adapter.install(gpd_root, target)
+        adapter.finalize_install(result)
+
+        alias_command = (target / "commands" / "ai4tp" / "new-project.toml").read_text(encoding="utf-8")
+        assert "/ai4tp:new-project" in alias_command
+        assert "name: ai4tp:new-project" in alias_command
+
     def test_install_rewrites_set_profile_shell_block_for_gemini(
         self,
         adapter: GeminiAdapter,

@@ -1849,6 +1849,403 @@ def init_milestone_op() -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# new-project — Terminal bootstrap aliases for project setup
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _prompt_for_project_brief() -> str:
+    """Collect a multi-line project brief from the terminal."""
+    console.print("[bold]Enter your project brief.[/]")
+    console.print(
+        "[dim]Include the core question, the success signal, and any anchors or say 'anchor unknown'.[/]"
+    )
+    console.print("[dim]Finish with a blank line.[/]")
+
+    lines: list[str] = []
+    while True:
+        try:
+            line = input()
+        except EOFError:
+            break
+
+        if not line.strip():
+            if lines:
+                break
+            continue
+        lines.append(line.rstrip())
+
+    return "\n".join(lines).strip()
+
+
+def _bootstrap_project_from_brief(
+    cwd: Path,
+    brief: str,
+    *,
+    title: str | None = None,
+    force: bool = False,
+    git_init: bool = True,
+) -> dict[str, object]:
+    """Create a minimal but valid `.gpd/` project bootstrap from a terminal brief."""
+    import subprocess
+
+    from gpd.core.config import GPDProjectConfig
+    from gpd.core.constants import ProjectLayout
+    from gpd.core.state import state_set_project_contract
+    from gpd.core.utils import atomic_write
+
+    clean_brief = brief.strip()
+    if not clean_brief:
+        raise ValueError("No project brief provided")
+
+    collapsed = " ".join(clean_brief.split())
+    question = collapsed[:200].rstrip()
+    if len(collapsed) > 200:
+        question += "..."
+
+    title_text = title.strip() if isinstance(title, str) and title.strip() else " ".join(collapsed.split()[:8]).strip()
+    if not title_text:
+        title_text = "New Research Project"
+
+    lower_brief = collapsed.casefold()
+    has_anchor_hint = any(token in lower_brief for token in ("anchor", "benchmark", "baseline", "reference", "compare"))
+    anchor_unknown_note = "Anchor unknown — benchmark/reference still to identify during initial scoping."
+    rethink_note = (
+        "If the first planning pass cannot identify a decisive output or a trustworthy grounding anchor, pause and rethink the approach."
+    )
+
+    layout = ProjectLayout(cwd)
+    bootstrap_paths = (
+        layout.project_md,
+        layout.roadmap,
+        layout.requirements_md,
+        layout.config_json,
+        layout.state_json,
+        layout.state_md,
+        layout.gpd / "PROJECT-BRIEF.md",
+        layout.gpd / "CONVENTIONS.md",
+    )
+    if not force and any(path.exists() for path in bootstrap_paths):
+        raise ValueError(
+            f"A GPD project already exists at {_format_display_path(layout.gpd)}. Use --force to overwrite the bootstrap files."
+        )
+
+    layout.gpd.mkdir(parents=True, exist_ok=True)
+
+    defaults = GPDProjectConfig()
+    config_dict = {
+        "autonomy": defaults.autonomy.value,
+        "execution": {
+            "review_cadence": defaults.review_cadence.value,
+            "max_unattended_minutes_per_plan": defaults.max_unattended_minutes_per_plan,
+            "max_unattended_minutes_per_wave": defaults.max_unattended_minutes_per_wave,
+            "checkpoint_after_n_tasks": defaults.checkpoint_after_n_tasks,
+            "checkpoint_after_first_load_bearing_result": defaults.checkpoint_after_first_load_bearing_result,
+            "checkpoint_before_downstream_dependent_tasks": defaults.checkpoint_before_downstream_dependent_tasks,
+        },
+        "research_mode": defaults.research_mode.value,
+        "commit_docs": defaults.commit_docs,
+        "parallelization": defaults.parallelization,
+        "model_profile": defaults.model_profile.value,
+        "workflow": {
+            "research": defaults.research,
+            "plan_checker": defaults.plan_checker,
+            "verifier": defaults.verifier,
+        },
+        "git": {
+            "branching_strategy": defaults.branching_strategy.value,
+            "phase_branch_template": defaults.phase_branch_template,
+            "milestone_branch_template": defaults.milestone_branch_template,
+        },
+    }
+    atomic_write(layout.config_json, json.dumps(config_dict, indent=2) + "\n")
+
+    contract = {
+        "scope": {
+            "question": question,
+            "in_scope": [
+                "Translate the approved brief into a scoped research project and initial roadmap.",
+                collapsed,
+            ],
+            "out_of_scope": [
+                "Unapproved extensions beyond the initial brief before the first roadmap review.",
+            ],
+            "unresolved_questions": [] if has_anchor_hint else [anchor_unknown_note],
+        },
+        "context_intake": {
+            "user_asserted_anchors": (
+                ["Use the benchmark/reference named in the brief as the initial grounding anchor."] if has_anchor_hint else []
+            ),
+            "context_gaps": [] if has_anchor_hint else [anchor_unknown_note],
+            "crucial_inputs": [collapsed],
+        },
+        "observables": [
+            {
+                "id": "OBS-001",
+                "name": "Primary project outcome",
+                "kind": "other",
+                "definition": collapsed,
+            }
+        ],
+        "claims": [
+            {
+                "id": "CLAIM-001",
+                "statement": "The terminal brief is captured clearly enough to begin structured phase planning.",
+                "observables": ["OBS-001"],
+                "deliverables": ["DELIV-001"],
+                "acceptance_tests": ["AT-001"],
+            }
+        ],
+        "deliverables": [
+            {
+                "id": "DELIV-001",
+                "kind": "note",
+                "path": ".gpd/PROJECT.md",
+                "description": "PROJECT.md captures the initial question, scope, and anchor status from the approved brief.",
+                "must_contain": [question],
+            }
+        ],
+        "acceptance_tests": [
+            {
+                "id": "AT-001",
+                "subject": "DELIV-001",
+                "kind": "existence",
+                "procedure": "Review `.gpd/PROJECT.md` and confirm it preserves the approved question, decisive output, and anchor status.",
+                "pass_condition": "PROJECT.md exists and accurately reflects the terminal brief.",
+                "evidence_required": ["DELIV-001"],
+                "automation": "human",
+            }
+        ],
+        "forbidden_proxies": [
+            {
+                "id": "FP-001",
+                "subject": "DELIV-001",
+                "proxy": "Treating an underspecified idea as a complete project plan without recording the question, output, and grounding anchor.",
+                "reason": "Project setup must preserve scope, decisive outputs, and grounding before execution begins.",
+            }
+        ],
+        "uncertainty_markers": {
+            "weakest_anchors": [anchor_unknown_note if not has_anchor_hint else "The benchmark/reference named in the brief still needs confirmation and exact sourcing."],
+            "disconfirming_observations": [rethink_note],
+        },
+    }
+
+    state_result = state_set_project_contract(cwd, contract)
+    if not state_result.updated and state_result.reason:
+        raise ValueError(state_result.reason)
+
+    brief_md = f"# Project Brief\n\n{clean_brief}\n"
+    project_md = (
+        f"# {title_text}\n\n"
+        f"## Core Question\n\n{question}\n\n"
+        f"## Original Brief\n\n{clean_brief}\n\n"
+        "## Scope Snapshot\n\n"
+        "- Preserve the approved brief while converting it into a structured GPD project.\n"
+        "- Establish at least one decisive output and a grounding anchor before deep execution.\n\n"
+        f"## Anchor Status\n\n- {anchor_unknown_note if not has_anchor_hint else 'A benchmark/reference is mentioned in the brief and should be validated during Phase 1.'}\n\n"
+        "## Immediate Next Step\n\n"
+        "- Review `.gpd/ROADMAP.md` and refine the first investigation chunk.\n"
+        "- Then run `ai4tp phase add \"Initial investigation\"` (or `gpd phase add \"Initial investigation\"`) to create the first tracked phase.\n"
+    )
+    requirements_md = (
+        "# Requirements\n\n"
+        "- **REQ-001** — Keep the core question explicit and stable during planning.\n"
+        "- **REQ-002** — Produce at least one decisive output or observable tied to the brief.\n"
+        "- **REQ-003** — Establish a concrete benchmark/reference, or explicitly resolve the anchor-unknown blocker during Phase 1.\n"
+    )
+    roadmap_md = (
+        "# Roadmap\n\n"
+        "## Phase 1 — Scope and anchor validation\n\n"
+        "- Refine the brief into an execution-ready plan.\n"
+        "- Confirm the decisive output and the first grounding anchor.\n\n"
+        "## Phase 2 — First investigation\n\n"
+        "- Execute the first analysis implied by the approved brief.\n"
+        "- Record results and verification evidence in `.gpd/STATE.md`.\n"
+    )
+    conventions_md = (
+        "# Conventions\n\n"
+        "No project-wide notation or unit conventions are locked yet. Capture them here before major derivations or simulations.\n"
+    )
+
+    atomic_write(layout.gpd / "PROJECT-BRIEF.md", brief_md)
+    atomic_write(layout.project_md, project_md)
+    atomic_write(layout.requirements_md, requirements_md)
+    atomic_write(layout.roadmap, roadmap_md)
+    atomic_write(layout.gpd / "CONVENTIONS.md", conventions_md)
+
+    git_initialized = False
+    has_git = False
+    if git_init:
+        try:
+            probe = subprocess.run(
+                ["git", "rev-parse", "--is-inside-work-tree"],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            has_git = probe.returncode == 0 and probe.stdout.strip().lower() == "true"
+            if not has_git:
+                init_result = subprocess.run(
+                    ["git", "init"],
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                git_initialized = init_result.returncode == 0
+                has_git = has_git or git_initialized
+        except (OSError, subprocess.SubprocessError):
+            has_git = False
+            git_initialized = False
+
+    return {
+        "created": True,
+        "question": question,
+        "project_dir": _format_display_path(layout.gpd),
+        "brief_file": _format_display_path(layout.gpd / "PROJECT-BRIEF.md"),
+        "project_file": _format_display_path(layout.project_md),
+        "roadmap_file": _format_display_path(layout.roadmap),
+        "requirements_file": _format_display_path(layout.requirements_md),
+        "state_file": _format_display_path(layout.state_json),
+        "git_initialized": git_initialized,
+        "has_git": has_git,
+        "next_step": "Run `ai4tp phase add \"Initial investigation\"` after reviewing the generated `.gpd/` files.",
+    }
+
+
+new_app = typer.Typer(help="Bootstrap a new project or milestone from the terminal")
+app.add_typer(new_app, name="new")
+
+
+@app.command("new-project")
+def new_project_cmd(
+    brief: list[str] = typer.Argument(None, help="Optional inline project brief. If omitted, you will be prompted."),
+    file: Path | None = typer.Option(None, "--file", help="Read the project brief from a markdown/text file."),
+    title: str | None = typer.Option(None, "--title", help="Optional project title for PROJECT.md."),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing bootstrap in the current directory."),
+    git_init: bool = typer.Option(True, "--git-init/--no-git-init", help="Initialize git if the current directory is not already a repository."),
+) -> None:
+    """Create a new GPD project from a terminal brief."""
+    if file is not None and brief:
+        _error("Provide either an inline brief or --file, not both.")
+
+    if file is not None:
+        try:
+            brief_text = file.read_text(encoding="utf-8")
+        except OSError as exc:
+            _error(f"Cannot read brief file {_format_display_path(file)}: {exc}")
+    else:
+        brief_text = " ".join(brief).strip() if brief else ""
+        if not brief_text:
+            brief_text = _prompt_for_project_brief()
+
+    if not brief_text.strip():
+        _error("No project brief provided. Supply it inline, with --file, or enter it interactively.")
+
+    try:
+        result = _bootstrap_project_from_brief(_get_cwd(), brief_text, title=title, force=force, git_init=git_init)
+    except ValueError as exc:
+        _error(str(exc))
+    _output(result)
+
+
+@new_app.command("project")
+def new_project_alias(
+    brief: list[str] = typer.Argument(None, help="Optional inline project brief. If omitted, you will be prompted."),
+    file: Path | None = typer.Option(None, "--file", help="Read the project brief from a markdown/text file."),
+    title: str | None = typer.Option(None, "--title", help="Optional project title for PROJECT.md."),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing bootstrap in the current directory."),
+    git_init: bool = typer.Option(True, "--git-init/--no-git-init", help="Initialize git if needed."),
+) -> None:
+    """Alias for `gpd new-project` / `ai4tp new-project`."""
+    new_project_cmd(brief=brief, file=file, title=title, force=force, git_init=git_init)
+
+
+@app.command("research")
+def research_cmd(
+    major: bool = typer.Option(False, "--major", help="Enable major-research mode with human review gates."),
+    topic: list[str] = typer.Option(None, "--topic", help="Short topic or title for the major research project."),
+    brief: Path | None = typer.Option(None, "--brief", help="Read the project brief from a markdown/text file."),
+    max_phases: int = typer.Option(10, "--max-phases", min=1, max=20, help="Maximum number of phases to scaffold."),
+    max_units_per_phase: int = typer.Option(
+        3,
+        "--max-units-per-phase",
+        min=1,
+        max=6,
+        help="Maximum number of small execution units per phase.",
+    ),
+) -> None:
+    """Start a major research program that pauses after each small unit for human review."""
+    from gpd.core.major_research import start_major_research
+
+    if not major:
+        _error("This MVP requires `--major`. Run `ai4tp research --major --topic \"...\"`.")
+    if brief is not None and topic:
+        _error("Provide either `--topic` or `--brief`, not both.")
+
+    topic_text = " ".join(topic).strip() if topic else None
+    brief_text: str | None = None
+    if brief is not None:
+        try:
+            brief_text = brief.read_text(encoding="utf-8")
+        except OSError as exc:
+            _error(f"Cannot read brief file {_format_display_path(brief)}: {exc}")
+    elif not topic_text:
+        brief_text = _prompt_for_project_brief()
+
+    try:
+        result = start_major_research(
+            _get_cwd(),
+            topic=topic_text,
+            brief_text=brief_text,
+            max_phases=max_phases,
+            max_units_per_phase=max_units_per_phase,
+        )
+    except ValueError as exc:
+        _error(str(exc))
+    _output(result)
+
+
+@app.command("review")
+def review_cmd(
+    approve: bool = typer.Option(False, "--approve", help="Approve the current execution unit."),
+    revise: str | None = typer.Option(None, "--revise", help="Request revision with reviewer feedback."),
+) -> None:
+    """Record a human review decision for the current major-research unit."""
+    from gpd.core.major_research import review_major_research
+
+    try:
+        result = review_major_research(_get_cwd(), approve=approve, revise_feedback=revise)
+    except ValueError as exc:
+        _error(str(exc))
+    _output(result)
+
+
+@app.command("resume")
+def resume_cmd() -> None:
+    """Resume the saved major-research program from the next allowed unit."""
+    from gpd.core.major_research import resume_major_research
+
+    try:
+        result = resume_major_research(_get_cwd())
+    except ValueError as exc:
+        _error(str(exc))
+    _output(result)
+
+
+@app.command("status")
+def status_cmd() -> None:
+    """Show the current saved status for the major-research program."""
+    from gpd.core.major_research import major_research_status
+
+    try:
+        result = major_research_status(_get_cwd())
+    except ValueError as exc:
+        _error(str(exc))
+    _output(result)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # extras — Approximations, uncertainties, questions, calculations
 # ═══════════════════════════════════════════════════════════════════════════
 

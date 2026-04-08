@@ -18,6 +18,7 @@ from gpd.adapters.install_utils import (
     parse_jsonc,
     read_settings,
     remove_stale_agents,
+    rewrite_command_namespace_alias,
     translate_frontmatter_tool_names,
     verify_installed,
     write_settings,
@@ -63,6 +64,7 @@ class ClaudeCodeAdapter(RuntimeAdapter):
     def _install_commands(self, gpd_root: Path, target_dir: Path, path_prefix: str, failures: list[str]) -> int:
         commands_src = gpd_root / "commands"
         commands_dest = target_dir / "commands" / "gpd"
+        alias_dest = target_dir / "commands" / "ai4tp"
         (target_dir / "commands").mkdir(parents=True, exist_ok=True)
         bridge_command = self.runtime_cli_bridge_command(target_dir)
 
@@ -74,6 +76,10 @@ class ClaudeCodeAdapter(RuntimeAdapter):
             )
             return _rewrite_gpd_cli_invocations(translated, bridge_command)
 
+        def _translate_alias(content: str, prefix: str, install_scope: str | None = None) -> str:
+            translated = _translate(content, prefix, install_scope)
+            return rewrite_command_namespace_alias(translated, target_namespace="ai4tp")
+
         copy_with_path_replacement(
             commands_src,
             commands_dest,
@@ -82,10 +88,22 @@ class ClaudeCodeAdapter(RuntimeAdapter):
             self._current_install_scope_flag(),
             markdown_transform=_translate,
         )
+        copy_with_path_replacement(
+            commands_src,
+            alias_dest,
+            path_prefix,
+            self.runtime_name,
+            self._current_install_scope_flag(),
+            markdown_transform=_translate_alias,
+        )
         if verify_installed(commands_dest, "commands/gpd"):
             logger.info("Installed commands/gpd")
         else:
             failures.append("commands/gpd")
+        if verify_installed(alias_dest, "commands/ai4tp"):
+            logger.info("Installed commands/ai4tp")
+        else:
+            failures.append("commands/ai4tp")
         return sum(1 for f in commands_dest.rglob("*.md") if f.is_file()) if commands_dest.exists() else 0
 
     def _install_agents(self, gpd_root: Path, target_dir: Path, path_prefix: str, failures: list[str]) -> int:

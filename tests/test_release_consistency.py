@@ -702,6 +702,7 @@ def test_fresh_built_release_artifacts_match_public_bootstrap_and_docs(tmp_path:
         entry_points = wheel_zip.read(f"get_physics_done-{version}.dist-info/entry_points.txt").decode("utf-8")
         metadata = wheel_zip.read(f"get_physics_done-{version}.dist-info/METADATA").decode("utf-8")
         assert "gpd = gpd.cli:entrypoint" in entry_points
+        assert "ai4tp = gpd.cli:entrypoint" in entry_points
         assert _wheel_dependency_names(metadata) == _expected_runtime_dependency_names()
 
     sdist_prefix = f"get_physics_done-{version}/"

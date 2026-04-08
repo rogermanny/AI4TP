@@ -99,6 +99,14 @@ def test_python_floor_is_consistent_across_install_surfaces() -> None:
     assert "Python 3.11+ is required" in installer
 
 
+def test_ai4tp_alias_points_to_primary_cli_entrypoint() -> None:
+    repo_root = _repo_root()
+    script_lines = _project_script_lines(repo_root)
+
+    assert 'gpd = "gpd.cli:entrypoint"' in script_lines
+    assert 'ai4tp = "gpd.cli:entrypoint"' in script_lines
+
+
 def test_canonical_registry_skill_inventory_counts_match_repo_contents() -> None:
     repo_root = _repo_root()
     commands_count = len(list((repo_root / "src" / "gpd" / "commands").glob("*.md")))

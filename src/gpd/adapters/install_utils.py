@@ -301,6 +301,53 @@ def render_markdown_frontmatter(preamble: str, frontmatter: str, separator: str,
     return rendered + body
 
 
+def rewrite_command_namespace_alias(
+    content: str,
+    *,
+    target_namespace: str,
+    source_namespace: str = "gpd",
+) -> str:
+    """Rewrite runtime-facing slash/skill command references to an alias namespace."""
+    if not target_namespace or target_namespace == source_namespace:
+        return content
+
+    rewritten = content
+    replacements = (
+        (f"name: {source_namespace}:", f"name: {target_namespace}:"),
+        (f"name: {source_namespace}-", f"name: {target_namespace}-"),
+        (f"/{source_namespace}:", f"/{target_namespace}:"),
+        (f"/{source_namespace}-", f"/{target_namespace}-"),
+        (f"${source_namespace}-", f"${target_namespace}-"),
+        (f"commands/{source_namespace}/", f"commands/{target_namespace}/"),
+    )
+    for old, new in replacements:
+        rewritten = rewritten.replace(old, new)
+
+    is_help_surface = any(
+        marker in rewritten
+        for marker in (
+            f"name: {target_namespace}:help",
+            f"name: {target_namespace}-help",
+            "description: Show GPD help",
+            "description = \"Show GPD help\"",
+        )
+    )
+    if is_help_surface and f"/{target_namespace}:" not in rewritten and f"/{target_namespace}-" not in rewritten:
+        uses_flat_commands = (
+            f"name: {target_namespace}-help" in rewritten
+            or re.search(r"(?m)^tools:\n(?:\s{2,}[A-Za-z0-9_]+: true\n?)+", rewritten) is not None
+        )
+        command_sep = "-" if uses_flat_commands else ":"
+        rewritten = rewritten.rstrip() + (
+            "\n\nAlias quick start:\n"
+            f"- /{target_namespace}{command_sep}new-project\n"
+            f"- /{target_namespace}{command_sep}plan-phase 1\n"
+            f"- /{target_namespace}{command_sep}execute-phase 1\n"
+            f"- /{target_namespace}{command_sep}help --all\n"
+        )
+    return rewritten
+
+
 def _default_markdown_transform(runtime: str) -> Callable[[str, str, str | None], str]:
     """Resolve the adapter-owned shared-markdown transform for *runtime*."""
     from gpd.adapters import get_adapter
@@ -490,7 +537,7 @@ def write_settings(settings_path: str | Path, settings: dict[str, object]) -> No
     except PermissionError as exc:
         raise PermissionError(f"Cannot write to settings directory {p.parent} — check permissions") from exc
     try:
-        tmp_path.rename(p)
+        tmp_path.replace(p)
     except OSError:
         tmp_path.unlink(missing_ok=True)
         raise
@@ -1043,10 +1090,12 @@ def write_manifest(
     for rel, h in generate_manifest(gpd_dir).items():
         files["get-physics-done/" + rel] = h
 
-    # commands/gpd/
-    if commands_dir.exists():
-        for rel, h in generate_manifest(commands_dir).items():
-            files["commands/gpd/" + rel] = h
+    # commands/{gpd,ai4tp}/
+    for namespace in ("gpd", "ai4tp"):
+        namespace_dir = config_dir / "commands" / namespace
+        if namespace_dir.exists():
+            for rel, h in generate_manifest(namespace_dir).items():
+                files[f"commands/{namespace}/" + rel] = h
 
     # agents/gpd-*.(md|toml)
     if agents_dir.exists():
@@ -1070,7 +1119,7 @@ def write_manifest(
         skills = Path(skills_dir)
         if skills.exists():
             for entry in sorted(skills.iterdir()):
-                if entry.is_dir() and entry.name.startswith("gpd-"):
+                if entry.is_dir() and entry.name.startswith(("gpd-", "ai4tp-")):
                     skill_md = entry / "SKILL.md"
                     if skill_md.exists():
                         files[f"skills/{entry.name}/SKILL.md"] = file_hash(skill_md)
@@ -1122,14 +1171,15 @@ def _managed_install_paths(
     for rel in generate_manifest(gpd_dir).keys():
         managed_paths.append(f"get-physics-done/{rel}")
 
-    commands_dir = config_dir / "commands" / "gpd"
-    for rel in generate_manifest(commands_dir).keys():
-        managed_paths.append(f"commands/gpd/{rel}")
+    for namespace in ("gpd", "ai4tp"):
+        commands_dir = config_dir / "commands" / namespace
+        for rel in generate_manifest(commands_dir).keys():
+            managed_paths.append(f"commands/{namespace}/{rel}")
 
     command_dir = config_dir / "command"
     if command_dir.exists():
         for entry in sorted(command_dir.iterdir()):
-            if entry.is_file() and entry.name.startswith("gpd-") and entry.suffix == ".md":
+            if entry.is_file() and entry.name.startswith(("gpd-", "ai4tp-")) and entry.suffix == ".md":
                 managed_paths.append(f"command/{entry.name}")
 
     agents_dir = config_dir / "agents"
@@ -1146,7 +1196,7 @@ def _managed_install_paths(
         skills = Path(skills_dir)
         if skills.exists():
             for entry in sorted(skills.iterdir()):
-                if entry.is_dir() and entry.name.startswith("gpd-"):
+                if entry.is_dir() and entry.name.startswith(("gpd-", "ai4tp-")):
                     skill_md = entry / "SKILL.md"
                     if skill_md.exists():
                         managed_paths.append(f"skills/{entry.name}/SKILL.md")
@@ -1624,9 +1674,9 @@ def build_hook_command(
     """
     command_interpreter = interpreter or hook_python_interpreter()
     if is_global or explicit_target:
-        hooks_path = str(target_dir / "hooks" / hook_filename).replace("\\", "/")
-        return f"{shlex.quote(command_interpreter)} {shlex.quote(hooks_path)}"
-    return f"{shlex.quote(command_interpreter)} {shlex.quote(f'{config_dir_name}/hooks/{hook_filename}')}"
+        hooks_path = target_dir / "hooks" / hook_filename
+        return f"{command_interpreter} {hooks_path}"
+    return f"{command_interpreter} {config_dir_name}/hooks/{hook_filename}"
 
 
 # ---------------------------------------------------------------------------

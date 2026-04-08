@@ -4,7 +4,8 @@
   "gpdPythonVersion": "1.1.0",
   "description": "Open-source AI copilot for physics research across supported AI runtimes",
   "bin": {
-    "get-physics-done": "bin/install.js"
+    "get-physics-done": "bin/install.js",
+    "ai4tp": "bin/install.js"
   },
   "files": [
     "bin/",

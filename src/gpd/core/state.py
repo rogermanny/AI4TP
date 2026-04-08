@@ -1524,8 +1524,8 @@ def _recover_intent_locked(cwd: Path) -> None:
 
     if json_tmp_exists and md_tmp_exists and json_valid and md_valid:
         # Both temp files ready and valid — complete the interrupted write
-        os.rename(json_tmp, json_path)
-        os.rename(md_tmp, md_path)
+        os.replace(json_tmp, json_path)
+        os.replace(md_tmp, md_path)
     else:
         # Partial or corrupt — rollback by cleaning up temp files
         if json_tmp_exists:
@@ -1639,8 +1639,8 @@ def _write_state_pair_locked(cwd: Path, *, state_obj: dict, md_content: str) -> 
         atomic_write(md_tmp, md_content)
 
         intent_file.write_text(f"{json_tmp}\n{md_tmp}\n", encoding="utf-8")
-        os.rename(json_tmp, json_path)
-        os.rename(md_tmp, md_path)
+        os.replace(json_tmp, json_path)
+        os.replace(md_tmp, md_path)
         try:
             intent_file.unlink(missing_ok=True)
         except OSError:

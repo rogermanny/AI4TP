@@ -174,6 +174,16 @@ class TestCopyFlattenedCommands:
         dest.mkdir()
         assert copy_flattened_commands(tmp_path / "nope", dest, "gpd", "/") == 0
 
+    def test_ai4tp_prefix_rewrites_slash_references(self, gpd_root: Path, tmp_path: Path) -> None:
+        dest = tmp_path / "command"
+        dest.mkdir()
+        count = copy_flattened_commands(gpd_root / "commands", dest, "ai4tp", "/prefix/")
+
+        assert count >= 2
+        content = (dest / "ai4tp-help.md").read_text(encoding="utf-8")
+        assert "/ai4tp-plan-phase" in content
+        assert "/gpd:" not in content
+
 
 class TestCopyAgentsAsAgentFiles:
     def test_copies_agents_with_conversion(self, gpd_root: Path, tmp_path: Path) -> None:
