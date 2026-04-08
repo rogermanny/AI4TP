@@ -1,4 +1,4 @@
-# Get Physics Done (GPD)
+# AI4TP / Get Physics Done (GPD)
 
 ### Built by physicists, for physicists
 
@@ -8,6 +8,8 @@
 [![npm](https://img.shields.io/npm/v/get-physics-done)](https://www.npmjs.com/package/get-physics-done)
 
 Get Physics Done is an open-source AI copilot for physics research from [Physical Superintelligence PBC (PSI)](https://www.psi.inc), released as a community contribution. GPD helps turn a research question into a structured workflow: scope the problem, plan the work, derive results, verify them, and package the output.
+
+**AI4TP** is the AI4TP-branded surface of that workflow. It exposes the `ai4tp` terminal command and matching runtime aliases such as `/ai4tp:help`, while remaining compatible with the underlying GPD project structure and research loop.
 
 https://github.com/user-attachments/assets/e79f8153-c0bd-484f-b69e-da8f142649e0
 
@@ -55,6 +57,29 @@ Typical new-project workflow:
 
 `new-project -> plan-phase 1 -> execute-phase 1 -> verify-work 1`
 
+## What AI4TP Does
+
+AI4TP is the **terminal and orchestration alias** for GPD in this repository.
+
+You can use either `gpd` or `ai4tp`, but `ai4tp` is the AI4TP-branded entrypoint for:
+
+- **interactive project bootstrap** from the terminal with `ai4tp new-project`
+- **major research orchestration** with `ai4tp research --major --topic "..."`
+- a saved **execute → verify → human approve/revise → resume** loop
+- runtime/chat aliases such as `/ai4tp:help`, `/ai4tp:new-project`, `$ai4tp-help`, and `/ai4tp-help`
+
+Typical major-research flow:
+
+```bash
+ai4tp research --major --topic "Constructive 2D Yang-Mills"
+ai4tp status
+ai4tp review --approve
+ai4tp review --revise "feedback"
+ai4tp resume
+```
+
+In major mode, AI4TP breaks the project into small execution units, writes execution and verification records under `.gpd/major/`, pauses for human expert review, and only proceeds to the next unit after approval or revision.
+
 <details>
 <summary><strong>Install options</strong></summary>
 
@@ -94,6 +119,8 @@ GPD currently installs into four AI runtimes. To preselect one during install, u
 
 Each runtime uses its own command prefix, but the workflow is the same across all four. After installing GPD, open your chosen runtime normally from your system terminal and use the commands shown above.
 
+AI4TP-branded aliases are installed alongside the GPD ones, so the same surfaces are also available as `/ai4tp:help`, `/ai4tp:new-project`, `$ai4tp-help`, `$ai4tp-new-project`, `/ai4tp-help`, and `/ai4tp-new-project` depending on runtime.
+
 Notes:
 - Claude Code-specific note: GPD writes `.claude/settings.json` for hooks and statusline. MCP servers are added to project `.mcp.json` for local installs or `~/.claude.json` for global installs.
 - Codex-specific note: GPD writes `.codex/config.toml` during install, enables `features.multi_agent = true`, configures the required notify hook and built-in MCP servers, registers GPD agent roles in `[agents.*]`, and for local installs exposes only public `gpd-*` agents there as discoverable skills in repo-scoped `.agents/skills/`; the full agent catalog still installs under `.codex/agents/` for direct invocation.
@@ -123,6 +150,8 @@ GPD guides research in four stages:
 2. **Plan**: creates a phased roadmap with concrete tasks, dependencies, and success criteria.
 3. **Execute**: runs specialist agents for derivations, numerical checks, literature work, and writing.
 4. **Verify**: checks dimensional consistency, limiting cases, symmetry constraints, conservation laws, and numerical stability.
+
+In **AI4TP major-research mode**, that loop is wrapped in a persistent human-in-the-loop controller: AI4TP plans the next unit, records execution and pre-review verification artifacts, pauses for an expert to `approve` or `revise`, then resumes from saved state with `ai4tp resume`.
 
 Each phase produces real artifacts such as `PROJECT.md`, `REQUIREMENTS.md`, `ROADMAP.md`, `STATE.md`, `.tex` derivations, `.py` verification scripts, and figures.
 
